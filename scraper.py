@@ -25,7 +25,7 @@ def getLinks(targetURL):
     try:
         page = requests.get(targetURL, headers=HEADERS)
 
-        if page.statusCode == 200:
+        if page.status_code == 200:
             soup = BeautifulSoup(page.content, 'html.parser')
             contentArea = soup.find('div', class_='entry-content')
             
@@ -45,7 +45,7 @@ def getLinks(targetURL):
             else:
                 print("Error: The 'entry-content' div was not found.")
         else:
-            print(f"Error: The server returned status code {page.statusCode}")
+            print(f"Error: The server returned status code {page.status_code}")
 
     except requests.exceptions.RequestException as e:
         print(f"An error occurred: {e}")
