@@ -1,6 +1,1 @@
-# The scraper script is executed with environment variables injected
-      - name: Run Scraper
-        env: 
-          EMAIL_USER: ${{ secrets.EMAIL_USER }}
-          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-        run: python scraper.py
+#moved all of this code into github workflow
