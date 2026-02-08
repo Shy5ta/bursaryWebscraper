@@ -18,11 +18,7 @@ HEADERS = {
 }
 
 def getBursaryDetails(bursaryUrl):
-    """
-    Trying to find the actual closing date on the bursary page
-    """
     try:
-        # Preventing spamming their server
         time.sleep(0.5)
         
         page = requests.get(bursaryUrl, headers=HEADERS, timeout=5)
@@ -37,54 +33,85 @@ def getBursaryDetails(bursaryUrl):
         if not contentDiv:
             return "Not Found"
 
-        # grab all the text from the page
-        fullText = contentDiv.get_text()
+        Look for <strong> or <b> tags containing "Closing Date"
+        # then grab the text right after it
+        strongTags = contentDiv.find_all(['strong', 'b'])
+        for tag in strongTags:
+            tagText = tag.get_text().strip()
+            if 'closing date' in tagText.lower() or 'deadline' in tagText.lower():
+                # the date might be in the same tag after a colon
+                if ':' in tagText:
+                    datePart = tagText.split(':', 1)[1].strip()
+                    if datePart and len(datePart) > 3:
+                        return datePart
+                
+                # or it might be in the next sibling element
+                nextElement = tag.next_sibling
+                if nextElement:
+                    dateText = nextElement.strip() if isinstance(nextElement, str) else nextElement.get_text().strip()
+                    if dateText and len(dateText) > 3 and len(dateText) < 100:
+                        # clean up common prefixes
+                        dateText = dateText.lstrip(':').strip()
+                        return dateText
+                
+                # or maybe in the parent's next sibling
+                parent = tag.parent
+                if parent and parent.next_sibling:
+                    nextSib = parent.next_sibling
+                    dateText = nextSib.strip() if isinstance(nextSib, str) else nextSib.get_text().strip()
+                    if dateText and len(dateText) > 3 and len(dateText) < 100:
+                        return dateText.lstrip(':').strip()
         
-        # look for "Closing Date" followed by whatever the actual date is
-        # regex pattern: finds "Closing Date" then grabs everything after it until a newline
-        closingDatePattern = r'Closing\s+Date\s*:?\s*([^\n]+)'
-        match = re.search(closingDatePattern, fullText, re.IGNORECASE)
+        # METHOD 2
+        tables = contentDiv.find_all('table')
+        for table in tables:
+            rows = table.find_all('tr')
+            for row in rows:
+                cells = row.find_all(['td', 'th'])
+                for i, cell in enumerate(cells):
+                    cellText = cell.get_text().strip()
+                    if 'closing date' in cellText.lower() or 'deadline' in cellText.lower():
+                        # date is probably in the next cell
+                        if i + 1 < len(cells):
+                            dateText = cells[i + 1].get_text().strip()
+                            if dateText and len(dateText) > 3:
+                                return dateText
         
-        if match:
-            # this should be the actual date text
-            dateText = match.group(1).strip()
-            
-            dateText = dateText.split('\n')[0]  # just first line
-            dateText = dateText.split('.')[0]   # remove stuff after period
-            dateText = dateText.strip()
-            
-            if len(dateText) > 3 and len(dateText) < 100:
-                return dateText
+        # Look for paragraph with "Closing Date:" and grab what's after
+        paragraphs = contentDiv.find_all('p')
+        for para in paragraphs:
+            paraText = para.get_text()
+            if 'closing date' in paraText.lower() or 'deadline' in paraText.lower():
+                # try to extract just the date part
+                match = re.search(r'(?:closing date|deadline)\s*:?\s*([^\n\.]+)', paraText, re.IGNORECASE)
+                if match:
+                    dateText = match.group(1).strip()
+                    if len(dateText) > 3 and len(dateText) < 100:
+                        return dateText
         
-        alternativePatterns = [
-            r'Deadline\s*:?\s*([^\n]+)',
-            r'Applications\s+close\s*:?\s*([^\n]+)',
-            r'Close\s+date\s*:?\s*([^\n]+)'
-        ]
-        
-        for pattern in alternativePatterns:
-            match = re.search(pattern, fullText, re.IGNORECASE)
-            if match:
-                dateText = match.group(1).strip().split('\n')[0].strip()
-                if len(dateText) > 3 and len(dateText) < 100:
-                    return dateText
+        # Look in list items
+        listItems = contentDiv.find_all('li')
+        for li in listItems:
+            liText = li.get_text()
+            if 'closing date' in liText.lower() or 'deadline' in liText.lower():
+                match = re.search(r'(?:closing date|deadline)\s*:?\s*([^\n]+)', liText, re.IGNORECASE)
+                if match:
+                    dateText = match.group(1).strip()
+                    if len(dateText) > 3 and len(dateText) < 100:
+                        return dateText
         
         return "Open / Unspecified"
         
     except requests.exceptions.Timeout:
-        print(f"  Timeout - took too long to load")
+        print(f"  Timeout")
         return "Timeout - Check Manually"
-    except requests.exceptions.RequestException as e:
-        print(f"  Request failed")
-        return "Error"
     except Exception as e:
-        print(f"  Something went wrong")
+        print(f"  Error: {str(e)[:50]}")
         return "Error"
 
 def getBursaryLinks(targetUrl, maxBursaries=20):
     """
-    Scrapes the main page for bursary links
-    Only processes first 20 to avoid timing out on GitHub Actions
+    Gets the list of bursary links from the main page
     """
     bursaryList = []
     print(f"Connecting to {targetUrl}...")
@@ -99,15 +126,14 @@ def getBursaryLinks(targetUrl, maxBursaries=20):
             if contentArea:
                 listItems = contentArea.find_all('li')
                 totalItems = len(listItems)
-                print(f"Found {totalItems} links on the page")
-                print(f"Processing up to {maxBursaries} to stay under time limit...\n")
+                print(f"Found {totalItems} links")
+                print(f"Processing first {maxBursaries}...\n")
                 
                 processedCount = 0
                 
                 for index, item in enumerate(listItems, 1):
-                    # stop after we hit the limit
                     if processedCount >= maxBursaries:
-                        print(f"\nStopped at {maxBursaries} bursaries (timeout protection)")
+                        print(f"\nStopped at {maxBursaries}")
                         break
                     
                     linkElement = item.find('a')
@@ -117,7 +143,7 @@ def getBursaryLinks(targetUrl, maxBursaries=20):
                         href = linkElement.get('href')
                         
                         if href and ('bursary' in href or 'scholarship' in href):
-                            print(f"[{processedCount+1}/{min(maxBursaries, totalItems)}] {title[:60]}...")
+                            print(f"[{processedCount+1}/{maxBursaries}] {title[:60]}...")
                             deadline = getBursaryDetails(href)
                             
                             bursaryList.append({
@@ -129,53 +155,44 @@ def getBursaryLinks(targetUrl, maxBursaries=20):
                             
                             processedCount += 1
                 
-                print(f"\nDone - scraped {len(bursaryList)} bursaries")
+                print(f"\nScraped {len(bursaryList)} bursaries")
             else:
-                print("Error: Couldn't find the content div")
+                print("Error: Content div not found")
         else:
-            print(f"Error: Server returned status {page.status_code}")
+            print(f"Error: Status {page.status_code}")
 
-    except requests.exceptions.Timeout:
-        print(f"Connection timeout - server took too long")
-    except requests.exceptions.RequestException as e:
-        print(f"Network error: {e}")
     except Exception as e:
-        print(f"Unexpected error: {e}")
+        print(f"Error: {e}")
 
     return bursaryList
 
 def saveToExcel(data, filename="bursaries.xlsx"):
     """
-    Saves everything to an Excel file
+    Saves to Excel file
     """
     if not data:
-        print("Warning: No data to save")
+        print("No data to save")
         return
         
     df = pd.DataFrame(data)
-    # make sure columns are in the right order
     df = df[["Bursary Name", "Closing Date", "Link", "Date Scraped"]]
     df.to_excel(filename, index=False)
     print(f"Saved {len(data)} bursaries to {filename}")
 
 def sendEmail(filename):
     """
-    Emails the Excel file to myself
+    Sends email with the Excel attachment
     """
     emailSender = os.environ.get('EMAIL_USER')
     emailPassword = os.environ.get('EMAIL_PASS')
     
     if not emailSender or not emailPassword:
-        print("Skipping email - no credentials set (this is fine for local testing)")
+        print("Skipping email - no credentials")
         return
 
     emailReceiver = emailSender
-    subject = f"Bursary Report (With Deadlines) - {datetime.now().strftime('%Y-%m-%d')}"
-    body = """Here's the latest bursary list with closing dates.
-
-Note: Only showing first 20 to keep things fast and reliable.
-Check the full list at: https://www.zabursaries.co.za/computer-science-it-bursaries-south-africa/
-"""
+    subject = f"Bursary Report - {datetime.now().strftime('%Y-%m-%d')}"
+    body = "Latest bursary list with closing dates attached."
 
     msg = MIMEMultipart()
     msg['From'] = emailSender
@@ -184,7 +201,6 @@ Check the full list at: https://www.zabursaries.co.za/computer-science-it-bursar
     msg.attach(MIMEText(body, 'plain'))
 
     try:
-        # attach the excel file
         with open(filename, "rb") as attachment:
             part = MIMEBase("application", "octet-stream")
             part.set_payload(attachment.read())
@@ -193,45 +209,32 @@ Check the full list at: https://www.zabursaries.co.za/computer-science-it-bursar
         part.add_header("Content-Disposition", f"attachment; filename={filename}")
         msg.attach(part)
         
-        # actually send it
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
         server.login(emailSender, emailPassword)
         server.sendmail(emailSender, emailReceiver, msg.as_string())
         server.quit()
-        print("Email sent successfully")
+        print("Email sent")
 
-    except smtplib.SMTPAuthenticationError:
-        print("Email auth failed - check your app password")
-    except smtplib.SMTPException as e:
-        print(f"SMTP error: {e}")
     except Exception as e:
-        print(f"Error sending email: {e}")
+        print(f"Email failed: {e}")
 
 if __name__ == "__main__":
-    print("\n" + "="*70)
-    print("BURSARY SCRAPER - Starting...")
-    print("="*70 + "\n")
+    print("\n" + "="*60)
+    print("BURSARY SCRAPER")
+    print("="*60 + "\n")
     
     startTime = time.time()
     
-    # only doing first 20 so this doesn't timeout
     results = getBursaryLinks(URL, maxBursaries=20)
     
-    endTime = time.time()
-    duration = endTime - startTime
+    duration = time.time() - startTime
     
     if results:
         excelFilename = "bursaries.xlsx"
         saveToExcel(results, excelFilename)
         sendEmail(excelFilename)
         
-        print("\n" + "="*70)
-        print(f"COMPLETE - Got {len(results)} bursaries in {duration:.1f} seconds")
-        print("Check your email!")
-        print("="*70 + "\n")
+        print(f"\nDone - {len(results)} bursaries in {duration:.1f}s")
     else:
-        print("\n" + "="*70)
-        print("No bursaries found this time")
-        print(f"Runtime: {duration:.1f} seconds")
-        print("="*70 + "\n")
+        print(f"\nNo results - {duration:.1f}s")
