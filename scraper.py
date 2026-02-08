@@ -1,7 +1,3 @@
-"""
-Bursary Web Scraper - Actually works now
-"""
-
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -56,13 +52,11 @@ def getBursaryDetails(bursaryUrl):
                     # clean it up - remove extra whitespace and newlines
                     dateText = ' '.join(dateText.split())
                     
-                    # sometimes there's extra junk, just take the first line/sentence
                     dateText = dateText.split('\n')[0].strip()
                     
                     if len(dateText) > 3 and len(dateText) < 100:
                         return dateText
         
-        # if we didn't find it in h3, maybe try h2 or h4
         for heading in contentDiv.find_all(['h2', 'h4', 'h5']):
             headingText = heading.get_text().strip()
             if 'closing date' in headingText.lower() or 'deadline' in headingText.lower():
@@ -212,3 +206,4 @@ if __name__ == "__main__":
         print(f"\nDone - {len(results)} bursaries in {duration:.1f}s")
     else:
         print(f"\nNo results - {duration:.1f}s")
+
