@@ -188,4 +188,5 @@ if __name__ == "__main__":
         
         # 3. Save
         saveToExcel(sortedResults)
-        # sendEmail("bursaries_fresh.xlsx")
+        sendEmail("bursaries_fresh.xlsx")
+
