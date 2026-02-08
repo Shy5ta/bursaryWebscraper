@@ -141,7 +141,7 @@ def sortBursariesByFreshness(data):
     data.sort(key=getSortDate, reverse=True)
     return data
 
-def saveToExcel(data, filename="fresh_bursaries.xlsx"):
+def saveToExcel(data, filename="ZABursaries_List.xlsx"):
     if not data: 
         print("No fresh bursaries found.")
         return
@@ -195,3 +195,4 @@ if __name__ == "__main__":
         sortedResults = sortBursariesByFreshness(results)
         saveToExcel(sortedResults)
         sendEmail("ZABursaries_List.xlsx")
+
