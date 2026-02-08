@@ -24,6 +24,7 @@ How to run it locally:
      python scraper.py
 
 What I learnt:
+
   Web scraping- How to use BeautifulSoup to parse HTML and extract specific data from websites
   
   APIs and libraries- Integrating Python libraries (requests, pandas)
