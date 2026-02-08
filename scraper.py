@@ -1,3 +1,7 @@
+"""
+Bursary Web Scraper - Actually works now
+"""
+
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -9,7 +13,6 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 import time
-import re
 
 URL = "https://www.zabursaries.co.za/computer-science-it-bursaries-south-africa/"
 
@@ -18,13 +21,16 @@ HEADERS = {
 }
 
 def getBursaryDetails(bursaryUrl):
+    """
+    Find closing date - it's in an h3 tag followed by a p tag
+    """
     try:
         time.sleep(0.5)
         
         page = requests.get(bursaryUrl, headers=HEADERS, timeout=5)
         
         if page.status_code != 200:
-            print(f"  Warning: Got status {page.status_code}")
+            print(f"  Warning: Status {page.status_code}")
             return "Check Link"
 
         soup = BeautifulSoup(page.content, 'html.parser')
@@ -33,70 +39,37 @@ def getBursaryDetails(bursaryUrl):
         if not contentDiv:
             return "Not Found"
 
-        Look for <strong> or <b> tags containing "Closing Date"
-        # then grab the text right after it
-        strongTags = contentDiv.find_all(['strong', 'b'])
-        for tag in strongTags:
-            tagText = tag.get_text().strip()
-            if 'closing date' in tagText.lower() or 'deadline' in tagText.lower():
-                # the date might be in the same tag after a colon
-                if ':' in tagText:
-                    datePart = tagText.split(':', 1)[1].strip()
-                    if datePart and len(datePart) > 3:
-                        return datePart
-                
-                # or it might be in the next sibling element
-                nextElement = tag.next_sibling
-                if nextElement:
-                    dateText = nextElement.strip() if isinstance(nextElement, str) else nextElement.get_text().strip()
-                    if dateText and len(dateText) > 3 and len(dateText) < 100:
-                        # clean up common prefixes
-                        dateText = dateText.lstrip(':').strip()
-                        return dateText
-                
-                # or maybe in the parent's next sibling
-                parent = tag.parent
-                if parent and parent.next_sibling:
-                    nextSib = parent.next_sibling
-                    dateText = nextSib.strip() if isinstance(nextSib, str) else nextSib.get_text().strip()
-                    if dateText and len(dateText) > 3 and len(dateText) < 100:
-                        return dateText.lstrip(':').strip()
+        # look for h3 tags that mention "closing date"
+        h3Tags = contentDiv.find_all('h3')
         
-        # METHOD 2
-        tables = contentDiv.find_all('table')
-        for table in tables:
-            rows = table.find_all('tr')
-            for row in rows:
-                cells = row.find_all(['td', 'th'])
-                for i, cell in enumerate(cells):
-                    cellText = cell.get_text().strip()
-                    if 'closing date' in cellText.lower() or 'deadline' in cellText.lower():
-                        # date is probably in the next cell
-                        if i + 1 < len(cells):
-                            dateText = cells[i + 1].get_text().strip()
-                            if dateText and len(dateText) > 3:
-                                return dateText
-        
-        # Look for paragraph with "Closing Date:" and grab what's after
-        paragraphs = contentDiv.find_all('p')
-        for para in paragraphs:
-            paraText = para.get_text()
-            if 'closing date' in paraText.lower() or 'deadline' in paraText.lower():
-                # try to extract just the date part
-                match = re.search(r'(?:closing date|deadline)\s*:?\s*([^\n\.]+)', paraText, re.IGNORECASE)
-                if match:
-                    dateText = match.group(1).strip()
+        for h3 in h3Tags:
+            h3Text = h3.get_text().strip()
+            
+            # check if this h3 is about closing date
+            if 'closing date' in h3Text.lower():
+                # the actual date should be in the next p tag
+                nextP = h3.find_next('p')
+                
+                if nextP:
+                    dateText = nextP.get_text().strip()
+                    
+                    # clean it up - remove extra whitespace and newlines
+                    dateText = ' '.join(dateText.split())
+                    
+                    # sometimes there's extra junk, just take the first line/sentence
+                    dateText = dateText.split('\n')[0].strip()
+                    
                     if len(dateText) > 3 and len(dateText) < 100:
                         return dateText
         
-        # Look in list items
-        listItems = contentDiv.find_all('li')
-        for li in listItems:
-            liText = li.get_text()
-            if 'closing date' in liText.lower() or 'deadline' in liText.lower():
-                match = re.search(r'(?:closing date|deadline)\s*:?\s*([^\n]+)', liText, re.IGNORECASE)
-                if match:
-                    dateText = match.group(1).strip()
+        # if we didn't find it in h3, maybe try h2 or h4
+        for heading in contentDiv.find_all(['h2', 'h4', 'h5']):
+            headingText = heading.get_text().strip()
+            if 'closing date' in headingText.lower() or 'deadline' in headingText.lower():
+                nextP = heading.find_next('p')
+                if nextP:
+                    dateText = nextP.get_text().strip()
+                    dateText = ' '.join(dateText.split())
                     if len(dateText) > 3 and len(dateText) < 100:
                         return dateText
         
@@ -145,6 +118,7 @@ def getBursaryLinks(targetUrl, maxBursaries=20):
                         if href and ('bursary' in href or 'scholarship' in href):
                             print(f"[{processedCount+1}/{maxBursaries}] {title[:60]}...")
                             deadline = getBursaryDetails(href)
+                            print(f"  -> {deadline}")
                             
                             bursaryList.append({
                                 "Bursary Name": title,
