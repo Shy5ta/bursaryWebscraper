@@ -10,14 +10,21 @@ What I used:
 
 How to run it locally:
   1. Clone the repo
-     git clone [https://github.com/Shy5ta/bursarywebscraper.git]                      (https://github.com/Shy5ta/bursarywebscraper.git)
+     git clone (https://github.com/Shy5ta/bursarywebscraper.git)
 
 
   2. Install the requirements
      pip install -r requirements.txt
 
   3. Set up your email (Environment Variables)
-     Set "EMAIL_USER" (your email address) and "EMAIL_PASS" (your App               Password) in your teminal
+      Set "EMAIL_USER" (your Gmail address) and "EMAIL_PASS" (your Gmail App Password - NOT your regular password).
+      To create an App Password: https://support.google.com/accounts/answer/185833
 
   4. Run the script
      python scraper.py
+
+What I learnt:
+  Web scraping- How to use BeautifulSoup to parse HTML and extract specific data from websites
+  APIs and libraries- Integrating Python libraries (requests, pandas)
+  Automation with GitHub Actions- Setting up scheduled workflows to run code automatically
+  Email protocols- Understanding SMTP and how to send emails with attachments
