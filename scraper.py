@@ -9,6 +9,7 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 import time
+import re
 
 URL = "https://www.zabursaries.co.za/computer-science-it-bursaries-south-africa/"
 
@@ -18,18 +19,16 @@ HEADERS = {
 
 def getBursaryDetails(bursaryUrl):
     """
-    Find the 'Closing Date' by scanning all text on the page.
-    Includes timeout protection to prevent hanging.
+    Trying to find the actual closing date on the bursary page
     """
     try:
-        # Rate limiting
+        # Preventing spamming their server
         time.sleep(0.5)
         
-        #5 second timeout to prevent hanging
         page = requests.get(bursaryUrl, headers=HEADERS, timeout=5)
         
         if page.status_code != 200:
-            print(f"Status {page.status_code}")
+            print(f"  Warning: Got status {page.status_code}")
             return "Check Link"
 
         soup = BeautifulSoup(page.content, 'html.parser')
@@ -38,48 +37,54 @@ def getBursaryDetails(bursaryUrl):
         if not contentDiv:
             return "Not Found"
 
-        # Scan line by line for closing date
-        pageText = contentDiv.get_text(separator="\n").split("\n")
+        # grab all the text from the page
+        fullText = contentDiv.get_text()
         
-        dateKeywords = ["Closing Date", "Deadline", "Applications close", "Close date", "Closing date"]
+        # look for "Closing Date" followed by whatever the actual date is
+        # regex pattern: finds "Closing Date" then grabs everything after it until a newline
+        closingDatePattern = r'Closing\s+Date\s*:?\s*([^\n]+)'
+        match = re.search(closingDatePattern, fullText, re.IGNORECASE)
         
-        for i, line in enumerate(pageText):
-            cleanLine = line.strip()
+        if match:
+            # this should be the actual date text
+            dateText = match.group(1).strip()
             
-            if not cleanLine:
-                continue
-                
-            # Check if any keyword is in this line 
-            for keyword in dateKeywords:
-                if keyword.lower() in cleanLine.lower():
-                    # Extract date from same line
-                    lowerLine = cleanLine.lower()
-                    startIndex = lowerLine.find(keyword.lower()) + len(keyword)
-                    finalDate = cleanLine[startIndex:].replace(":", "").strip()
-                    
-                    # If date is too short, it might be on the next line
-                    if len(finalDate) < 3 and i + 1 < len(pageText):
-                        finalDate = pageText[i + 1].strip()
-                    
-                    if len(finalDate) > 2:
-                        return finalDate
-                    
+            dateText = dateText.split('\n')[0]  # just first line
+            dateText = dateText.split('.')[0]   # remove stuff after period
+            dateText = dateText.strip()
+            
+            if len(dateText) > 3 and len(dateText) < 100:
+                return dateText
+        
+        alternativePatterns = [
+            r'Deadline\s*:?\s*([^\n]+)',
+            r'Applications\s+close\s*:?\s*([^\n]+)',
+            r'Close\s+date\s*:?\s*([^\n]+)'
+        ]
+        
+        for pattern in alternativePatterns:
+            match = re.search(pattern, fullText, re.IGNORECASE)
+            if match:
+                dateText = match.group(1).strip().split('\n')[0].strip()
+                if len(dateText) > 3 and len(dateText) < 100:
+                    return dateText
+        
         return "Open / Unspecified"
         
     except requests.exceptions.Timeout:
-        print(f"Timeout (5s exceeded)")
+        print(f"  Timeout - took too long to load")
         return "Timeout - Check Manually"
     except requests.exceptions.RequestException as e:
-        print(f"Request error: {str(e)[:50]}")
+        print(f"  Request failed")
         return "Error"
     except Exception as e:
-        print(f"Unexpected error: {str(e)[:50]}")
+        print(f"  Something went wrong")
         return "Error"
 
 def getBursaryLinks(targetUrl, maxBursaries=20):
     """
-    Scrapes bursary listings with a maximum limit to prevent timeouts.
-    Default: processes first 20 bursaries.
+    Scrapes the main page for bursary links
+    Only processes first 20 to avoid timing out on GitHub Actions
     """
     bursaryList = []
     print(f"Connecting to {targetUrl}...")
@@ -94,15 +99,15 @@ def getBursaryLinks(targetUrl, maxBursaries=20):
             if contentArea:
                 listItems = contentArea.find_all('li')
                 totalItems = len(listItems)
-                print(f"Found {totalItems} potential links on page")
-                print(f"Processing up to {maxBursaries} bursaries to avoid timeout...\n")
+                print(f"Found {totalItems} links on the page")
+                print(f"Processing up to {maxBursaries} to stay under time limit...\n")
                 
                 processedCount = 0
                 
                 for index, item in enumerate(listItems, 1):
-                    # STOP after maxBursaries to prevent timeout
+                    # stop after we hit the limit
                     if processedCount >= maxBursaries:
-                        print(f"\n Stopped at {maxBursaries} bursaries (timeout protection)")
+                        print(f"\nStopped at {maxBursaries} bursaries (timeout protection)")
                         break
                     
                     linkElement = item.find('a')
@@ -111,7 +116,6 @@ def getBursaryLinks(targetUrl, maxBursaries=20):
                         title = linkElement.text.strip()
                         href = linkElement.get('href')
                         
-                        # Filter for bursary links
                         if href and ('bursary' in href or 'scholarship' in href):
                             print(f"[{processedCount+1}/{min(maxBursaries, totalItems)}] {title[:60]}...")
                             deadline = getBursaryDetails(href)
@@ -125,52 +129,52 @@ def getBursaryLinks(targetUrl, maxBursaries=20):
                             
                             processedCount += 1
                 
-                print(f"\nSuccessfully scraped {len(bursaryList)} bursaries")
+                print(f"\nDone - scraped {len(bursaryList)} bursaries")
             else:
-                print(" Error: The 'entry-content' div was not found.")
+                print("Error: Couldn't find the content div")
         else:
-            print(f" Error: The server returned status code {page.status_code}")
+            print(f"Error: Server returned status {page.status_code}")
 
     except requests.exceptions.Timeout:
-        print(f"Connection timeout - server took too long to respond")
+        print(f"Connection timeout - server took too long")
     except requests.exceptions.RequestException as e:
-        print(f" Network error: {e}")
+        print(f"Network error: {e}")
     except Exception as e:
-        print(f" Unexpected error: {e}")
+        print(f"Unexpected error: {e}")
 
     return bursaryList
 
 def saveToExcel(data, filename="bursaries.xlsx"):
     """
-    Saves the data to an Excel file with consistent column ordering.
+    Saves everything to an Excel file
     """
     if not data:
-        print(" No data to save")
+        print("Warning: No data to save")
         return
         
     df = pd.DataFrame(data)
+    # make sure columns are in the right order
     df = df[["Bursary Name", "Closing Date", "Link", "Date Scraped"]]
     df.to_excel(filename, index=False)
-    print(f" Success: {len(data)} bursaries saved to {filename}")
+    print(f"Saved {len(data)} bursaries to {filename}")
 
 def sendEmail(filename):
     """
-    Sends the Excel file via email.
+    Emails the Excel file to myself
     """
     emailSender = os.environ.get('EMAIL_USER')
     emailPassword = os.environ.get('EMAIL_PASS')
     
     if not emailSender or not emailPassword:
-        print(" Skipping email: EMAIL_USER or EMAIL_PASS not set")
-        print("  (local testing procedure)")
+        print("Skipping email - no credentials set (this is fine for local testing)")
         return
 
     emailReceiver = emailSender
     subject = f"Bursary Report (With Deadlines) - {datetime.now().strftime('%Y-%m-%d')}"
-    body = """Please find attached the latest list of bursaries including closing dates.
+    body = """Here's the latest bursary list with closing dates.
 
-Note: This report includes the first 20 bursaries to ensure reliable delivery.
-If you need more, check the full list at: https://www.zabursaries.co.za/computer-science-it-bursaries-south-africa/
+Note: Only showing first 20 to keep things fast and reliable.
+Check the full list at: https://www.zabursaries.co.za/computer-science-it-bursaries-south-africa/
 """
 
     msg = MIMEMultipart()
@@ -180,6 +184,7 @@ If you need more, check the full list at: https://www.zabursaries.co.za/computer
     msg.attach(MIMEText(body, 'plain'))
 
     try:
+        # attach the excel file
         with open(filename, "rb") as attachment:
             part = MIMEBase("application", "octet-stream")
             part.set_payload(attachment.read())
@@ -188,29 +193,29 @@ If you need more, check the full list at: https://www.zabursaries.co.za/computer
         part.add_header("Content-Disposition", f"attachment; filename={filename}")
         msg.attach(part)
         
+        # actually send it
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
         server.login(emailSender, emailPassword)
         server.sendmail(emailSender, emailReceiver, msg.as_string())
         server.quit()
-        print("Success: Email sent successfully.")
+        print("Email sent successfully")
 
     except smtplib.SMTPAuthenticationError:
-        print("Email authentication failed - check your EMAIL_PASS (App Password)")
+        print("Email auth failed - check your app password")
     except smtplib.SMTPException as e:
-        print(f" SMTP error: {e}")
+        print(f"SMTP error: {e}")
     except Exception as e:
-        print(f" Error sending email: {e}")
+        print(f"Error sending email: {e}")
 
 if __name__ == "__main__":
     print("\n" + "="*70)
-    print(" "*15 + "BURSARY SCRAPER - Starting...")
+    print("BURSARY SCRAPER - Starting...")
     print("="*70 + "\n")
     
     startTime = time.time()
     
-    # Process only first 20 bursaries to stay under 5 minutes because previous code was 28+ min
-    # This ensures reliable execution in GitHub Actions
+    # only doing first 20 so this doesn't timeout
     results = getBursaryLinks(URL, maxBursaries=20)
     
     endTime = time.time()
@@ -222,11 +227,11 @@ if __name__ == "__main__":
         sendEmail(excelFilename)
         
         print("\n" + "="*70)
-        print(f" COMPLETE - Processed {len(results)} bursaries in {duration:.1f} seconds")
-        print("   Check your email for the report!")
+        print(f"COMPLETE - Got {len(results)} bursaries in {duration:.1f} seconds")
+        print("Check your email!")
         print("="*70 + "\n")
     else:
         print("\n" + "="*70)
-        print(" No bursaries were found during this run.")
-        print(f"   Runtime: {duration:.1f} seconds")
+        print("No bursaries found this time")
+        print(f"Runtime: {duration:.1f} seconds")
         print("="*70 + "\n")
