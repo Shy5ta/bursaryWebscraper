@@ -17,54 +17,34 @@ HEADERS = {
 }
 
 def getBursaryDetails(bursaryUrl):
-   
-    result = {
-        "closingDate": "Open / Unspecified",
-        "lastUpdated": "Unknown"
-    }
-    
+    """
+    Finds the Closing Date using the specific H3 -> P tag structure.
+    """
     try:
-        time.sleep(0.5) # Be polite
+        time.sleep(0.5) 
         page = requests.get(bursaryUrl, headers=HEADERS)
         if page.status_code != 200:
-            return result
+            return "Error Loading Page"
 
         soup = BeautifulSoup(page.content, 'html.parser')
-
-        #Find Hidden "Last Updated" Meta Tag
-        metaDate = soup.find("meta", property="article:modified_time")
         
-        if not metaDate:
-            metaDate = soup.find("meta", property="og:updated_time")
-            
-        if metaDate:
-            rawTime = metaDate.get("content", "")
-            if len(rawTime) >= 10:
-                result["lastUpdated"] = rawTime[:10]
-
-        # Find "Closing Date"
-        contentDiv = soup.find('div', class_='entry-content')
-        if contentDiv:
-            allText = contentDiv.get_text(separator="\n").split("\n")
-            keywords = ["Closing Date", "Deadline", "Applications close"]
-            
-            for line in allText:
-                cleanLine = line.strip()
-                if not cleanLine: continue
+        # Look for H3 Header
+        allHeaders = soup.find_all('h3')
+        
+        for h3 in allHeaders:
+            # Check if this header contains "Closing Date"
+            if "Closing Date" in h3.get_text():
+                # Grab the very next paragraph (<p>) tag after this header
+                nextParagraph = h3.find_next_sibling('p')
                 
-                for key in keywords:
-                    if key.lower() in cleanLine.lower():
-                        rawDate = cleanLine.lower().replace(key.lower(), "").replace(":", "").strip()
-                        if len(rawDate) > 2:
-                            result["closingDate"] = rawDate.title()
-                            break # Stop searching if we found it
-                if result["closingDate"] != "Open / Unspecified":
-                    break
+                if nextParagraph:
+                    # Return the text inside that paragraph
+                    return nextParagraph.get_text().strip()
+                    
+        return "Open / Unspecified"
 
     except Exception as e:
-        print(f"Error scraping details: {e}")
-
-    return result
+        return "Error"
 
 def getBursaryLinks(targetUrl):
     bursaryList = []
@@ -189,4 +169,5 @@ if __name__ == "__main__":
         # 3. Save
         saveToExcel(sortedResults)
         sendEmail("bursaries_fresh.xlsx")
+
 
