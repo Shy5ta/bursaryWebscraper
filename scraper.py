@@ -19,12 +19,9 @@ HEADERS = {
 
 def getBursaryDetails(bursaryUrl):
     """
-    Visits the page to find details. 
-    1. EXTRACTS 'dateModified' from the JSON-LD schema (Very Reliable).
-    2. Scans text for 'Closing Date'.
+    Only extracts 'dateModified' (Last Updated).
     """
     result = {
-        "closingDate": "Open / Unspecified",
         "lastUpdated": "Unknown"
     }
 
@@ -36,59 +33,39 @@ def getBursaryDetails(bursaryUrl):
 
         soup = BeautifulSoup(page.content, 'html.parser')
 
-        # --- TASK A: Find Hidden JSON-LD Date (The "Gold Standard") ---
-        # We look for the script tag that contains the SEO data
+        # Find Hidden JSON-LD Date
         schemaTags = soup.find_all("script", type="application/ld+json")
         for tag in schemaTags:
             try:
                 data = json.loads(tag.string)
-                # The data is often in a @graph list. We need to find the 'WebPage' object.
                 if "@graph" in data:
                     for item in data["@graph"]:
                         if item.get("@type") == "WebPage" and "dateModified" in item:
-                            # Found it! e.g., "2025-09-02T10:37:13+00:00"
                             rawTime = item["dateModified"]
                             if len(rawTime) >= 10:
                                 result["lastUpdated"] = rawTime[:10]
-                                break
+                                return result # Found it, return immediately
             except:
                 continue
         
-        # Fallback: If JSON failed, try the meta tag
+        # Otherwise find Meta tag
         if result["lastUpdated"] == "Unknown":
             metaDate = soup.find("meta", property="article:modified_time")
             if metaDate:
                 result["lastUpdated"] = metaDate.get("content", "")[:10]
 
-        # --- TASK B: Find "Closing Date" (Text Scan) ---
-        contentDiv = soup.find('div', class_='entry-content')
-        if contentDiv:
-            allText = contentDiv.get_text(separator="\n").split("\n")
-            keywords = ["Closing Date", "Deadline", "Applications close"]
-            
-            for line in allText:
-                cleanLine = line.strip()
-                if not cleanLine: continue
-                for key in keywords:
-                    if key.lower() in cleanLine.lower():
-                        rawDate = cleanLine.lower().replace(key.lower(), "").replace(":", "").strip()
-                        if len(rawDate) > 2:
-                            result["closingDate"] = rawDate.title()
-                            break 
-                if result["closingDate"] != "Open / Unspecified":
-                    break
-
-    except Exception as e:
-        # Just return what we have, don't crash
-        return result
+    except Exception:
+        pass
 
     return result
 
 def getBursaryLinks(targetUrl):
     bursaryList = []
+    seen_urls = set() # checking there are no duplicates
+    
     print(f"Connecting to {targetUrl}...")
 
-    # Define the 6-Month Cutoff Date
+    # the 6-Month Cutoff
     sixMonthsAgo = datetime.now() - timedelta(days=180)
     print(f"Filtering: Only keeping bursaries updated after {sixMonthsAgo.strftime('%Y-%m-%d')}")
     print("-" * 50)
@@ -111,14 +88,20 @@ def getBursaryLinks(targetUrl):
                         title = linkElement.text.strip()
                         href = linkElement.get('href')
                         
+                        # Duplication check
+                        if href in seen_urls:
+                            continue # Skip if the link was already checked
+                        
                         if href and ('bursary' in href or 'scholarship' in href):
+                            # Add to seen list
+                            seen_urls.add(href)
+                            
                             print(f"Scanning [{index+1}/{totalCount}]: {title} ... ", end="", flush=True)
                             
-                            # Get details
                             details = getBursaryDetails(href)
                             lastUpdatedStr = details["lastUpdated"]
                             
-                            # --- THE 6-MONTH FILTER ---
+                            # Checking for bursaries within the last 6 months
                             isFresh = False
                             if lastUpdatedStr != "Unknown":
                                 try:
@@ -126,18 +109,17 @@ def getBursaryLinks(targetUrl):
                                     if updateDate > sixMonthsAgo:
                                         isFresh = True
                                 except:
-                                    pass # If date format is weird, assume not fresh
+                                    pass
                             
                             if isFresh:
-                                print(f"✅ KEEP (Updated {lastUpdatedStr})")
+                                print(f"KEEP (Updated {lastUpdatedStr})")
                                 bursaryList.append({
                                     "Bursary Name": title,
-                                    "Closing Date": details["closingDate"],
                                     "Last Updated": details["lastUpdated"], 
                                     "Link": href
                                 })
                             else:
-                                print(f"❌ SKIP (Old: {lastUpdatedStr})")
+                                print(f"SKIP (Old: {lastUpdatedStr})")
 
             else:
                 print("Error: Could not find list.")
@@ -150,7 +132,6 @@ def getBursaryLinks(targetUrl):
     return bursaryList
 
 def sortBursariesByFreshness(data):
-    # Sort by Newest First
     def getSortDate(item):
         try:
             return datetime.strptime(item["Last Updated"], "%Y-%m-%d")
@@ -166,7 +147,7 @@ def saveToExcel(data, filename="fresh_bursaries.xlsx"):
         return
     
     df = pd.DataFrame(data)
-    df = df[["Bursary Name", "Last Updated", "Closing Date", "Link"]]
+    df = df[["Bursary Name", "Last Updated", "Link"]]
     df.to_excel(filename, index=False)
     print(f"\nSuccess! Saved {len(data)} fresh bursaries to {filename}")
 
@@ -178,8 +159,7 @@ def sendEmail(filename):
         print("Skipping email: No environment variables set.")
         return
 
-    # CHANGE THIS to your student/personal email for testing!
-    emailReceiver = emailSender 
+    emailReceiver = emailSender
     
     msg = MIMEMultipart()
     msg['From'] = emailSender
@@ -214,4 +194,4 @@ if __name__ == "__main__":
     if results:
         sortedResults = sortBursariesByFreshness(results)
         saveToExcel(sortedResults)
-        sendEmail("fresh_bursaries.xlsx")
+        sendEmail("ZABursaries_List.xlsx")
