@@ -17,74 +17,61 @@ HEADERS = {
 }
 
 def getBursaryDetails(bursaryUrl):
-    """
-    Find closing date - it's in an h3 tag followed by a p tag
-    """
+   
+    result = {
+        "closingDate": "Open / Unspecified",
+        "lastUpdated": "Unknown"
+    }
+    
     try:
-        time.sleep(0.5)
-        
-        page = requests.get(bursaryUrl, headers=HEADERS, timeout=5)
-        
+        time.sleep(0.5) # Be polite
+        page = requests.get(bursaryUrl, headers=HEADERS)
         if page.status_code != 200:
-            print(f"  Warning: Status {page.status_code}")
-            return "Check Link"
+            return result
 
         soup = BeautifulSoup(page.content, 'html.parser')
-        
-        contentDiv = soup.find('div', class_='entry-content')
-        if not contentDiv:
-            return "Not Found"
 
-        # look for h3 tags that mention "closing date"
-        h3Tags = contentDiv.find_all('h3')
+        #Find Hidden "Last Updated" Meta Tag
+        metaDate = soup.find("meta", property="article:modified_time")
         
-        for h3 in h3Tags:
-            h3Text = h3.get_text().strip()
+        if not metaDate:
+            metaDate = soup.find("meta", property="og:updated_time")
             
-            # check if this h3 is about closing date
-            if 'closing date' in h3Text.lower():
-                # the actual date should be in the next p tag
-                nextP = h3.find_next('p')
-                
-                if nextP:
-                    dateText = nextP.get_text().strip()
-                    
-                    # clean it up - remove extra whitespace and newlines
-                    dateText = ' '.join(dateText.split())
-                    
-                    dateText = dateText.split('\n')[0].strip()
-                    
-                    if len(dateText) > 3 and len(dateText) < 100:
-                        return dateText
-        
-        for heading in contentDiv.find_all(['h2', 'h4', 'h5']):
-            headingText = heading.get_text().strip()
-            if 'closing date' in headingText.lower() or 'deadline' in headingText.lower():
-                nextP = heading.find_next('p')
-                if nextP:
-                    dateText = nextP.get_text().strip()
-                    dateText = ' '.join(dateText.split())
-                    if len(dateText) > 3 and len(dateText) < 100:
-                        return dateText
-        
-        return "Open / Unspecified"
-        
-    except requests.exceptions.Timeout:
-        print(f"  Timeout")
-        return "Timeout - Check Manually"
-    except Exception as e:
-        print(f"  Error: {str(e)[:50]}")
-        return "Error"
+        if metaDate:
+            rawTime = metaDate.get("content", "")
+            if len(rawTime) >= 10:
+                result["lastUpdated"] = rawTime[:10]
 
-def getBursaryLinks(targetUrl, maxBursaries=20):
-    """
-    Gets the list of bursary links from the main page
-    """
+        # Find "Closing Date"
+        contentDiv = soup.find('div', class_='entry-content')
+        if contentDiv:
+            allText = contentDiv.get_text(separator="\n").split("\n")
+            keywords = ["Closing Date", "Deadline", "Applications close"]
+            
+            for line in allText:
+                cleanLine = line.strip()
+                if not cleanLine: continue
+                
+                for key in keywords:
+                    if key.lower() in cleanLine.lower():
+                        rawDate = cleanLine.lower().replace(key.lower(), "").replace(":", "").strip()
+                        if len(rawDate) > 2:
+                            result["closingDate"] = rawDate.title()
+                            break # Stop searching if we found it
+                if result["closingDate"] != "Open / Unspecified":
+                    break
+
+    except Exception as e:
+        print(f"Error scraping details: {e}")
+
+    return result
+
+def getBursaryLinks(targetUrl):
     bursaryList = []
     print(f"Connecting to {targetUrl}...")
 
     try:
-        page = requests.get(targetUrl, headers=HEADERS, timeout=15)
+        page = requests.get(targetUrl, headers=HEADERS)
 
         if page.status_code == 200:
             soup = BeautifulSoup(page.content, 'html.parser')
@@ -92,17 +79,11 @@ def getBursaryLinks(targetUrl, maxBursaries=20):
             
             if contentArea:
                 listItems = contentArea.find_all('li')
-                totalItems = len(listItems)
-                print(f"Found {totalItems} links")
-                print(f"Processing first {maxBursaries}...\n")
+                totalCount = len(listItems)
+                print(f"Found {totalCount} bursaries. Checking for recent updates...")
+                print("-" * 50)
                 
-                processedCount = 0
-                
-                for index, item in enumerate(listItems, 1):
-                    if processedCount >= maxBursaries:
-                        print(f"\nStopped at {maxBursaries}")
-                        break
-                    
+                for index, item in enumerate(listItems):
                     linkElement = item.find('a')
                     
                     if linkElement:
@@ -110,62 +91,72 @@ def getBursaryLinks(targetUrl, maxBursaries=20):
                         href = linkElement.get('href')
                         
                         if href and ('bursary' in href or 'scholarship' in href):
-                            print(f"[{processedCount+1}/{maxBursaries}] {title[:60]}...")
-                            deadline = getBursaryDetails(href)
-                            print(f"  -> {deadline}")
+                            print(f"Scanning [{index+1}/{totalCount}]: {title}")
+                            
+                            # Get BOTH details
+                            details = getBursaryDetails(href)
                             
                             bursaryList.append({
                                 "Bursary Name": title,
-                                "Closing Date": deadline, 
-                                "Link": href,
-                                "Date Scraped": datetime.now().strftime("%Y-%m-%d")
+                                "Closing Date": details["closingDate"],
+                                "Last Updated": details["lastUpdated"], # <--- New Field
+                                "Link": href
                             })
-                            
-                            processedCount += 1
-                
-                print(f"\nScraped {len(bursaryList)} bursaries")
             else:
-                print("Error: Content div not found")
+                print("Error: Could not find list.")
         else:
-            print(f"Error: Status {page.status_code}")
+            print(f"Error: Server code {page.status_code}")
 
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Critical Error: {e}")
 
     return bursaryList
 
-def saveToExcel(data, filename="bursaries.xlsx"):
+def sortBursariesByFreshness(data):
     """
-    Saves to Excel file
+    Sorts bursaries so the ones updated RECENTLY appear first.
     """
-    if not data:
-        print("No data to save")
-        return
-        
+    print("\nSorting by Last Updated (Freshness)...")
+    
+    def getSortDate(item):
+        dateStr = item["Last Updated"]
+        # If unknown, put it at the bottom (year 2000)
+        if dateStr == "Unknown":
+            return datetime(2000, 1, 1)
+        try:
+            return datetime.strptime(dateStr, "%Y-%m-%d")
+        except:
+            return datetime(2000, 1, 1)
+
+    # DESCENDING order (Newest dates first)
+    data.sort(key=getSortDate, reverse=True)
+    return data
+
+def saveToExcel(data, filename="bursaries_fresh.xlsx"):
+    if not data: return
+    
     df = pd.DataFrame(data)
-    df = df[["Bursary Name", "Closing Date", "Link", "Date Scraped"]]
+    # Order columns nicely
+    df = df[["Bursary Name", "Last Updated", "Closing Date", "Link"]]
+    
     df.to_excel(filename, index=False)
-    print(f"Saved {len(data)} bursaries to {filename}")
+    print(f"Success! Saved {len(data)} bursaries to {filename}")
 
 def sendEmail(filename):
-    """
-    Sends email with the Excel attachment
-    """
     emailSender = os.environ.get('EMAIL_USER')
     emailPassword = os.environ.get('EMAIL_PASS')
     
-    if not emailSender or not emailPassword:
-        print("Skipping email - no credentials")
+    if not emailSender:
+        print("Skipping email: No environment variables set.")
         return
 
     emailReceiver = emailSender
-    subject = f"Bursary Report - {datetime.now().strftime('%Y-%m-%d')}"
-    body = "Latest bursary list with closing dates attached."
-
     msg = MIMEMultipart()
     msg['From'] = emailSender
     msg['To'] = emailReceiver
-    msg['Subject'] = subject
+    msg['Subject'] = f"Bursary Intelligence Report - {datetime.now().strftime('%Y-%m-%d')}"
+    
+    body = "Here is the list of bursaries, sorted by most recently updated."
     msg.attach(MIMEText(body, 'plain'))
 
     try:
@@ -174,7 +165,7 @@ def sendEmail(filename):
             part.set_payload(attachment.read())
         
         encoders.encode_base64(part)
-        part.add_header("Content-Disposition", f"attachment; filename={filename}")
+        part.add_header("Content-Disposition", f"attachment; filename= {filename}")
         msg.attach(part)
         
         server = smtplib.SMTP('smtp.gmail.com', 587)
@@ -182,28 +173,19 @@ def sendEmail(filename):
         server.login(emailSender, emailPassword)
         server.sendmail(emailSender, emailReceiver, msg.as_string())
         server.quit()
-        print("Email sent")
+        print("Email sent successfully.")
 
     except Exception as e:
-        print(f"Email failed: {e}")
+        print(f"Error sending email: {e}")
 
 if __name__ == "__main__":
-    print("\n" + "="*60)
-    print("BURSARY SCRAPER")
-    print("="*60 + "\n")
-    
-    startTime = time.time()
-    
-    results = getBursaryLinks(URL, maxBursaries=20)
-    
-    duration = time.time() - startTime
+    # 1. Scrape
+    results = getBursaryLinks(URL)
     
     if results:
-        excelFilename = "bursaries.xlsx"
-        saveToExcel(results, excelFilename)
-        sendEmail(excelFilename)
+        # 2. Sort by Update Time
+        sortedResults = sortBursariesByFreshness(results)
         
-        print(f"\nDone - {len(results)} bursaries in {duration:.1f}s")
-    else:
-        print(f"\nNo results - {duration:.1f}s")
-
+        # 3. Save
+        saveToExcel(sortedResults)
+        # sendEmail("bursaries_fresh.xlsx")
