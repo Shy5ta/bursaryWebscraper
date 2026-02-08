@@ -25,6 +25,9 @@ How to run it locally:
 
 What I learnt:
   Web scraping- How to use BeautifulSoup to parse HTML and extract specific data from websites
+  
   APIs and libraries- Integrating Python libraries (requests, pandas)
+  
   Automation with GitHub Actions- Setting up scheduled workflows to run code automatically
+  
   Email protocols- Understanding SMTP and how to send emails with attachments
