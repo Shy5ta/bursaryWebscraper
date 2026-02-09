@@ -18,15 +18,14 @@ HEADERS = {
 }
 
 def getBursaryDetails(bursaryUrl):
-    """
-    Only extracts 'dateModified' (Last Updated).
-    """
+    #Get the bursary details but only if they were updated within the last 6 months
+    
     result = {
         "lastUpdated": "Unknown"
     }
 
     try:
-        time.sleep(0.5) 
+        time.sleep(0.5) #A pause so that the server is not flooded by my reqs
         page = requests.get(bursaryUrl, headers=HEADERS)
         if page.status_code != 200:
             return result 
@@ -102,16 +101,16 @@ def getBursaryLinks(targetUrl):
                             lastUpdatedStr = details["lastUpdated"]
                             
                             # Checking for bursaries within the last 6 months
-                            isFresh = False
+                            isNew = False
                             if lastUpdatedStr != "Unknown":
                                 try:
                                     updateDate = datetime.strptime(lastUpdatedStr, "%Y-%m-%d")
                                     if updateDate > sixMonthsAgo:
-                                        isFresh = True
+                                        isNew = True
                                 except:
                                     pass
                             
-                            if isFresh:
+                            if isNew:
                                 print(f"KEEP (Updated {lastUpdatedStr})")
                                 bursaryList.append({
                                     "Bursary Name": title,
@@ -131,7 +130,7 @@ def getBursaryLinks(targetUrl):
 
     return bursaryList
 
-def sortBursariesByFreshness(data):
+def sortBursariesByDate(data):
     def getSortDate(item):
         try:
             return datetime.strptime(item["Last Updated"], "%Y-%m-%d")
@@ -143,13 +142,13 @@ def sortBursariesByFreshness(data):
 
 def saveToExcel(data, filename="ZABursaries_List.xlsx"):
     if not data: 
-        print("No fresh bursaries found.")
+        print("No new bursaries found.")
         return
     
     df = pd.DataFrame(data)
     df = df[["Bursary Name", "Last Updated", "Link"]]
     df.to_excel(filename, index=False)
-    print(f"\nSuccess! Saved {len(data)} fresh bursaries to {filename}")
+    print(f"\nSuccess! Saved {len(data)} new bursaries to {filename}")
 
 def sendEmail(filename):
     emailSender = os.environ.get('EMAIL_USER')
@@ -164,7 +163,7 @@ def sendEmail(filename):
     msg = MIMEMultipart()
     msg['From'] = emailSender
     msg['To'] = emailReceiver
-    msg['Subject'] = f"Fresh Bursaries (Last 6 Months) - {datetime.now().strftime('%Y-%m-%d')}"
+    msg['Subject'] = f"Bursaries (Last 6 Months) - {datetime.now().strftime('%Y-%m-%d')}"
     
     body = "Here are the bursaries updated in the last 6 months."
     msg.attach(MIMEText(body, 'plain'))
@@ -192,7 +191,6 @@ if __name__ == "__main__":
     results = getBursaryLinks(URL)
     
     if results:
-        sortedResults = sortBursariesByFreshness(results)
+        sortedResults = sortBursariesByDate(results)
         saveToExcel(sortedResults)
         sendEmail("ZABursaries_List.xlsx")
-
